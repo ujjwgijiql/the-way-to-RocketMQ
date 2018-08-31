@@ -92,4 +92,4 @@ NameServer数据的载体，记录Broker,Topic等信息。
 
     private final Random random = new Random();
 ```    
-2). 
+

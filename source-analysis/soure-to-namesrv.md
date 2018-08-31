@@ -6,7 +6,8 @@
 __1. org.apache.rocketmq.namesrv.NamesrvController__
 
 NameServer的核心控制类。
-``` NamesrvController 属性定义
+
+```Java NamesrvController 属性定义
     private final NamesrvConfig namesrvConfig;
 
     private final NettyServerConfig nettyServerConfig;
@@ -29,7 +30,7 @@ NameServer的核心控制类。
 __1.1. org.apache.rocketmq.common.namesrv.KVConfigManager__
 
 主要指定nameserver相关配置的目录属性
-``` KVConfigManager 属性定义
+```Java KVConfigManager 属性定义
     private String rocketmqHome = System.getProperty(MixAll.ROCKETMQ_HOME_PROPERTY, System.getenv(MixAll.ROCKETMQ_HOME_ENV));
     private String kvConfigPath = System.getProperty("user.home") + File.separator + "namesrv" + File.separator + "kvConfig.json";
     private String configStorePath = System.getProperty("user.home") + File.separator + "namesrv" + File.separator + "namesrv.properties";

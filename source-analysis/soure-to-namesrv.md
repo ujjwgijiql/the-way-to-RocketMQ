@@ -25,6 +25,7 @@ NameServer的核心控制类。
     private Configuration configuration;
     private FileWatchService fileWatchService;
 ```
+
 __1.1. org.apache.rocketmq.common.namesrv.KVConfigManager__
 
 主要指定nameserver相关配置的目录属性
@@ -37,4 +38,12 @@ __1.1. org.apache.rocketmq.common.namesrv.KVConfigManager__
     private boolean orderMessageEnable = false;
 ```
 1). kvConfigPath(kvConfig.json)
-2). orderMessageEnable：是否开启顺序消息功能，默认为false
+2). mqhome/namesrv/namesrv.properties
+3). orderMessageEnable：是否开启顺序消息功能，默认为false
+
+
+__1.2. ScheduledExecutorService scheduledExecutorService__
+
+NameServer 定时任务执行线程池，一个线程，默认定时执行两个任务：
+    任务1、每隔10s扫描broker,维护当前存活的Broker信息
+    任务2、每隔10s打印KVConfig信息。

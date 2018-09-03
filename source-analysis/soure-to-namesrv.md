@@ -3,8 +3,7 @@
 * NameServer相当于配置中心，维护Broker集群、Broker信息、Broker存活信息、主题与队列信息等。
 * NameServer彼此之间不通信，每个NameServer与集群内所有的Broker保持长连接。  
 
-__1. org.apache.rocketmq.namesrv.NamesrvController__
-
+__1. org.apache.rocketmq.namesrv.NamesrvController__    
 NameServer的核心控制类。
 
 ```Java NamesrvController 属性定义
@@ -27,8 +26,7 @@ NameServer的核心控制类。
     private FileWatchService fileWatchService;
 ```    
 &nbsp;   
-__1.1. org.apache.rocketmq.common.namesrv.NamesrvConfig__
-
+__1.1. org.apache.rocketmq.common.namesrv.NamesrvConfig__    
 主要指定nameserver相关配置的目录属性
 ```Java NamesrvConfig 属性定义
     private String rocketmqHome = System.getProperty(MixAll.ROCKETMQ_HOME_PROPERTY, System.getenv(MixAll.ROCKETMQ_HOME_ENV));

@@ -621,6 +621,14 @@ org.apache.rocketmq.remoting.netty.NettyRemotingAbstract
 应用场景：适用于某些耗时非常短，但对可靠性要求并不高的场景，例如日志收集。    
 &nbsp;    
 __1.6.2. Netty线程模型中EventLoopGroup、EventExecutorGroup之间的区别与作用__    
+EventExecutor:执行者，真正的线程对象（线程池）    
+EventLoop:线程模型对外类，继承自EventExecutor，增加通道注册等方法。    
+NioEventLoopGroup-->MultithreadEventLoopGroup (  EventLoop[] )  
+EventLoop -- > SingleThreadEventLoop --> SingleThreadEventExecutor    
+NioEventLoopGroup持有一个EventLoop数组，每一个EventLoop其实是有一个单个线程的线程池(EventExecutor)组成，EventLoop的线程为(SingleThreadEventExecutor的属性thread线程对象 )。    
+Netty有一个设计原则，就是在Channel的整个生命周期中，ChannelHandler的执行总是相同的一个线程（EventLoop、SingleThreadEventExecutor），我们知道Channel在调用注册到Selector上时会绑定一个EventLoop,默认所有的ChannelHandler的执行都在该线程上，是否可以改变ChannelHandler的执行线程呢？答案是可以的，通过在ChannelPipeline.addLast( EventLoopGroup group, ChannelHandler  )。    
+
+
 
 
 

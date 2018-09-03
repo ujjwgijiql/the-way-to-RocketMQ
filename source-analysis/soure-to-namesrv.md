@@ -694,7 +694,7 @@ io.netty.channel.DefaultChannelPipeline
     }
 ```    
 从上面的代码可以看到，如果ChannelPipeline.addLast指定了EventLoopGroup,会将该ChannelPipeline记录当前Pipeline对于EventLoopGroup使用EvenetLoopGroup的一个线程，并与此同时ChannelHandlerContext的executor为该group的一个线程。    
-ChannelHandler方法的执行逻辑：
+ChannelHandler方法的执行逻辑：    
 io.netty.channel.AbstractChannelHandlerContext
 ```Java
     @Override
@@ -727,7 +727,7 @@ io.netty.channel.AbstractChannelHandlerContext
         return ctx;
     }
 ```    
-如果，AbstractChannelHandlerContext的执行线程与该通道的eventLoop相同，则直接执行（这时是在IO线程中执行（Netty主从多Reactor线程模型，也就是selector对象所在的线程（处理读写(workEventLoopGroup)）），如果不是，则在ChannelHandlerContext的execute中执行：AbstractChannelHandlerContext
+如果，AbstractChannelHandlerContext的执行线程与该通道的eventLoop相同，则直接执行（这时是在IO线程中执行（Netty主从多Reactor线程模型，也就是selector对象所在的线程（处理读写(workEventLoopGroup)）），如果不是，则在ChannelHandlerContext的execute中执行：AbstractChannelHandlerContext    
 io.netty.channel.AbstractChannelHandlerContext
 ```Java
     private void invokeChannelRead(Object msg) {

@@ -621,15 +621,124 @@ org.apache.rocketmq.remoting.netty.NettyRemotingAbstract
 应用场景：适用于某些耗时非常短，但对可靠性要求并不高的场景，例如日志收集。    
 &nbsp;    
 __1.6.2. Netty线程模型中EventLoopGroup、EventExecutorGroup之间的区别与作用__    
-EventExecutor:执行者，真正的线程对象（线程池）    
-EventLoop:线程模型对外类，继承自EventExecutor，增加通道注册等方法。    
+EventExecutor：执行者，真正的线程对象（线程池）    
+EventLoop：线程模型对外类，继承自EventExecutor，增加通道注册等方法。    
 NioEventLoopGroup-->MultithreadEventLoopGroup (  EventLoop[] )  
 EventLoop -- > SingleThreadEventLoop --> SingleThreadEventExecutor    
 NioEventLoopGroup持有一个EventLoop数组，每一个EventLoop其实是有一个单个线程的线程池(EventExecutor)组成，EventLoop的线程为(SingleThreadEventExecutor的属性thread线程对象 )。    
 Netty有一个设计原则，就是在Channel的整个生命周期中，ChannelHandler的执行总是相同的一个线程（EventLoop、SingleThreadEventExecutor），我们知道Channel在调用注册到Selector上时会绑定一个EventLoop,默认所有的ChannelHandler的执行都在该线程上，是否可以改变ChannelHandler的执行线程呢？答案是可以的，通过在ChannelPipeline.addLast( EventLoopGroup group, ChannelHandler  )。    
+io.netty.channel.DefaultChannelPipeline
+```Java
+    @Override
+    public final ChannelPipeline addLast(EventExecutorGroup group, String name, ChannelHandler handler) {
+        final AbstractChannelHandlerContext newCtx;
+        synchronized (this) {
+            checkMultiplicity(handler);
 
+            newCtx = newContext(group, filterName(name, handler), handler);
 
+            addLast0(newCtx);
 
+            // If the registered is false it means that the channel was not registered on an eventloop yet.
+            // In this case we add the context to the pipeline and add a task that will call
+            // ChannelHandler.handlerAdded(...) once the channel is registered.
+            if (!registered) {
+                newCtx.setAddPending();
+                callHandlerCallbackLater(newCtx, true);
+                return this;
+            }
 
+            EventExecutor executor = newCtx.executor();
+            if (!executor.inEventLoop()) {
+                newCtx.setAddPending();
+                executor.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        callHandlerAdded0(newCtx);
+                    }
+                });
+                return this;
+            }
+        }
+        callHandlerAdded0(newCtx);
+        return this;
+    }
+    
+    
+    private AbstractChannelHandlerContext newContext(EventExecutorGroup group, String name, ChannelHandler handler) {
+        return new DefaultChannelHandlerContext(this, childExecutor(group), name, handler);
+    }
+    
+    
+    private EventExecutor childExecutor(EventExecutorGroup group) {
+        if (group == null) {
+            return null;
+        }
+        Boolean pinEventExecutor = channel.config().getOption(ChannelOption.SINGLE_EVENTEXECUTOR_PER_GROUP);
+        if (pinEventExecutor != null && !pinEventExecutor) {
+            return group.next();
+        }
+        Map<EventExecutorGroup, EventExecutor> childExecutors = this.childExecutors;
+        if (childExecutors == null) {
+            // Use size of 4 as most people only use one extra EventExecutor.
+            childExecutors = this.childExecutors = new IdentityHashMap<EventExecutorGroup, EventExecutor>(4);
+        }
+        // Pin one of the child executors once and remember it so that the same child executor
+        // is used to fire events for the same channel.
+        EventExecutor childExecutor = childExecutors.get(group);
+        if (childExecutor == null) {
+            childExecutor = group.next();
+            childExecutors.put(group, childExecutor);
+        }
+        return childExecutor;
+    }
+```    
+从上面的代码可以看到，如果ChannelPipeline.addLast指定了EventLoopGroup,会将该ChannelPipeline记录当前Pipeline对于EventLoopGroup使用EvenetLoopGroup的一个线程，并与此同时ChannelHandlerContext的executor为该group的一个线程。    
+ChannelHandler方法的执行逻辑：
+io.netty.channel.AbstractChannelHandlerContext
+```Java
+    @Override
+    public ChannelHandlerContext fireChannelRead(final Object msg) {
+        invokeChannelRead(findContextInbound(), msg);
+        return this;
+    }
+    
+    static void invokeChannelRead(final AbstractChannelHandlerContext next, final Object msg) {
+        ObjectUtil.checkNotNull(msg, "msg");
+        EventExecutor executor = next.executor();
+        if (executor.inEventLoop()) {
+            next.invokeChannelRead(msg);
+        } else {
+            executor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    next.invokeChannelRead(msg);
+                }
+            });
+        }
+    }
+    
 
-
+    private AbstractChannelHandlerContext findContextInbound() {
+        AbstractChannelHandlerContext ctx = this;
+        do {
+            ctx = ctx.next;
+        } while (!ctx.inbound);
+        return ctx;
+    }
+```    
+如果，AbstractChannelHandlerContext的执行线程与该通道的eventLoop相同，则直接执行（这时是在IO线程中执行（Netty主从多Reactor线程模型，也就是selector对象所在的线程（处理读写(workEventLoopGroup)）），如果不是，则在ChannelHandlerContext的execute中执行：AbstractChannelHandlerContext
+io.netty.channel.AbstractChannelHandlerContext
+```Java
+    private void invokeChannelRead(Object msg) {
+        if (invokeHandler()) {
+            try {
+                ((ChannelInboundHandler) handler()).channelRead(this, msg);
+            } catch (Throwable t) {
+                notifyHandlerException(t);
+            }
+        } else {
+            fireChannelRead(msg);
+        }
+    }
+```   

@@ -48,7 +48,6 @@ NameServer 定时任务执行线程池，一个线程，默认定时执行两个
 __1.3. org.apache.rocketmq.namesrv.kvconfig.KVConfigManager__    
 读取或变更NameServer的配置属性，加载NamesrvConfig中配置的配置文件到内存，此类一个亮点就是使用轻量级的非线程安全容器，再结合读写锁对资源读写进行保护。尽最大程度提高线程的并发度。    
 ```Java KVConfigManager 属性定义
-org.apache.rocketmq.namesrv.kvconfig.KVConfigManager
     private final NamesrvController namesrvController;
 
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
@@ -90,4 +89,236 @@ NameServer数据的载体，记录Broker,Topic等信息。
 
     private final Random random = new Random();
 ```    
+&nbsp;    
+__1.5. org.apache.rocketmq.namesrv.routeinfo.BrokerHousekeepingService__    
+BrokerHouseKeepingService实现 ChannelEventListener接口，可以说是通道在发送异常时的回调方法（Nameserver与Broker的连接通道在关闭、通道发送异常、通道空闲时），在上述数据结构中移除已Down掉的Broker。    
+org.apache.rocketmq.remoting.ChannelEventListener
+```Java ChannelEventListener 接口定义
+    void onChannelConnect(final String remoteAddr, final Channel channel);
+
+    void onChannelClose(final String remoteAddr, final Channel channel);
+
+    void onChannelException(final String remoteAddr, final Channel channel);
+
+    void onChannelIdle(final String remoteAddr, final Channel channel);
+```    
+&nbsp;    
+__1.6. NettyServerConfig nettyServerConfig、RemotingServer remotingServer、ExecutorService remotingExecutor__    
+这三个属性与网络通信有关，NameServer与Broker、Product、Consume之间的网络通信，基于Netty。
+1）NettyServerConfig 的配置含义    
+2）Netty线程模型中EventLoopGroup、EventExecutorGroup之间的区别于作用    
+3）在Channel的整个生命周期中，如何保证Channel的读写事件至始至终使用同一个线程处理    
+首先我们先过一下NettyServerConfig中的配置属性：    
+org.apache.rocketmq.remoting.netty.NettyServerConfig
+```Java NettyServerConfig 属性定义
+    private int listenPort = 8888;
+    private int serverWorkerThreads = 8;
+    private int serverCallbackExecutorThreads = 0;
+    private int serverSelectorThreads = 3;
+    private int serverOnewaySemaphoreValue = 256;
+    private int serverAsyncSemaphoreValue = 64;
+    private int serverChannelMaxIdleTimeSeconds = 120;
+
+    private int serverSocketSndBufSize = NettySystemConfig.socketSndbufSize;
+    private int serverSocketRcvBufSize = NettySystemConfig.socketRcvbufSize;
+    private boolean serverPooledByteBufAllocatorEnable = true;
+
+    /**
+     * make make install
+     *
+     *
+     * ../glibc-2.10.1/configure \ --prefix=/usr \ --with-headers=/usr/include \
+     * --host=x86_64-linux-gnu \ --build=x86_64-pc-linux-gnu \ --without-gd
+     */
+    private boolean useEpollNativeSelector = false;
+```    
+&nbsp;    
+__1.6.1. serverWorkerThreads__    
+含义：业务线程池的线程个数，RocketMQ按任务类型，每个任务类型会拥有一个专门的线程池，比如发送消息，消费消息，另外再加一个其他（默认的业务线程池），默认业务线程池，采用fixed类型，线程个数就是由serverWorkerThreads。    
+线程名称：RemotingExecutorThread_    
+作用范围：该参数目前主要用于NameServer的默认业务线程池，处理诸如broker,product,consume与NameServer的所有交互命令。    
+org.apache.rocketmq.namesrv.NamesrvController
+```Java initialize 方法
+    public boolean initialize() {
+
+        this.kvConfigManager.load();
+
+        this.remotingServer = new NettyRemotingServer(this.nettyServerConfig, this.brokerHousekeepingService);
+
+        // 创建一个线程容量为serverWorkerThreads的固定长度的线程池，该线程池供DefaultRequestProcessor类实现，该类实现具体的默认的请求命令处理。
+        this.remotingExecutor =
+            Executors.newFixedThreadPool(nettyServerConfig.getServerWorkerThreads(), new ThreadFactoryImpl("RemotingExecutorThread_"));
+
+        // 就是将DefaultRequestProcessor与创建的remotingExecutor线程池绑定在一起
+        this.registerProcessor();
+
+        this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
+
+            @Override
+            public void run() {
+                NamesrvController.this.routeInfoManager.scanNotActiveBroker();
+            }
+        }, 5, 10, TimeUnit.SECONDS);
+
+        this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
+
+            @Override
+            public void run() {
+                NamesrvController.this.kvConfigManager.printAllPeriodically();
+            }
+        }, 1, 10, TimeUnit.MINUTES);
+
+        if (TlsSystemConfig.tlsMode != TlsMode.DISABLED) {
+            // Register a listener to reload SslContext
+            try {
+                fileWatchService = new FileWatchService(
+                    new String[] {
+                        TlsSystemConfig.tlsServerCertPath,
+                        TlsSystemConfig.tlsServerKeyPath,
+                        TlsSystemConfig.tlsServerTrustCertPath
+                    },
+                    new FileWatchService.Listener() {
+                        boolean certChanged, keyChanged = false;
+                        @Override
+                        public void onChanged(String path) {
+                            if (path.equals(TlsSystemConfig.tlsServerTrustCertPath)) {
+                                log.info("The trust certificate changed, reload the ssl context");
+                                reloadServerSslContext();
+                            }
+                            if (path.equals(TlsSystemConfig.tlsServerCertPath)) {
+                                certChanged = true;
+                            }
+                            if (path.equals(TlsSystemConfig.tlsServerKeyPath)) {
+                                keyChanged = true;
+                            }
+                            if (certChanged && keyChanged) {
+                                log.info("The certificate and private key changed, reload the ssl context");
+                                certChanged = keyChanged = false;
+                                reloadServerSslContext();
+                            }
+                        }
+                        private void reloadServerSslContext() {
+                            ((NettyRemotingServer) remotingServer).loadSslContext();
+                        }
+                    });
+            } catch (Exception e) {
+                log.warn("FileWatchService created error, can't load the certificate dynamically");
+            }
+        }
+
+        return true;
+    }
+
+    private void registerProcessor() {
+        if (namesrvConfig.isClusterTest()) {
+
+            this.remotingServer.registerDefaultProcessor(new ClusterTestRequestProcessor(this, namesrvConfig.getProductEnvName()),
+                this.remotingExecutor);
+        } else {
+
+            this.remotingServer.registerDefaultProcessor(new DefaultRequestProcessor(this), this.remotingExecutor);
+        }
+    }
+```    
+具体的命令调用类：org.apache.rocketmq.remoting.netty.NettyRemotingAbstract   
+```Java
+    /**
+     * Process incoming request command issued by remote peer.
+     *
+     * @param ctx channel handler context.
+     * @param cmd request command.
+     */
+    public void processRequestCommand(final ChannelHandlerContext ctx, final RemotingCommand cmd) {
+        final Pair<NettyRequestProcessor, ExecutorService> matched = this.processorTable.get(cmd.getCode());
+        final Pair<NettyRequestProcessor, ExecutorService> pair = null == matched ? this.defaultRequestProcessor : matched;
+        final int opaque = cmd.getOpaque();
+
+        if (pair != null) {
+            Runnable run = new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        RPCHook rpcHook = NettyRemotingAbstract.this.getRPCHook();
+                        if (rpcHook != null) {
+                            rpcHook.doBeforeRequest(RemotingHelper.parseChannelRemoteAddr(ctx.channel()), cmd);
+                        }
+
+                        final RemotingCommand response = pair.getObject1().processRequest(ctx, cmd);
+                        if (rpcHook != null) {
+                            rpcHook.doAfterResponse(RemotingHelper.parseChannelRemoteAddr(ctx.channel()), cmd, response);
+                        }
+
+                        if (!cmd.isOnewayRPC()) {
+                            if (response != null) {
+                                response.setOpaque(opaque);
+                                response.markResponseType();
+                                try {
+                                    ctx.writeAndFlush(response);
+                                } catch (Throwable e) {
+                                    log.error("process request over, but response failed", e);
+                                    log.error(cmd.toString());
+                                    log.error(response.toString());
+                                }
+                            } else {
+
+                            }
+                        }
+                    } catch (Throwable e) {
+                        log.error("process request exception", e);
+                        log.error(cmd.toString());
+
+                        if (!cmd.isOnewayRPC()) {
+                            final RemotingCommand response = RemotingCommand.createResponseCommand(RemotingSysResponseCode.SYSTEM_ERROR,
+                                RemotingHelper.exceptionSimpleDesc(e));
+                            response.setOpaque(opaque);
+                            ctx.writeAndFlush(response);
+                        }
+                    }
+                }
+            };
+
+            if (pair.getObject1().rejectRequest()) {
+                final RemotingCommand response = RemotingCommand.createResponseCommand(RemotingSysResponseCode.SYSTEM_BUSY,
+                    "[REJECTREQUEST]system busy, start flow control for a while");
+                response.setOpaque(opaque);
+                ctx.writeAndFlush(response);
+                return;
+            }
+
+            try {
+                final RequestTask requestTask = new RequestTask(run, ctx.channel(), cmd);
+                pair.getObject2().submit(requestTask);
+            } catch (RejectedExecutionException e) {
+                if ((System.currentTimeMillis() % 10000) == 0) {
+                    log.warn(RemotingHelper.parseChannelRemoteAddr(ctx.channel())
+                        + ", too many requests and system thread pool busy, RejectedExecutionException "
+                        + pair.getObject2().toString()
+                        + " request code: " + cmd.getCode());
+                }
+
+                if (!cmd.isOnewayRPC()) {
+                    final RemotingCommand response = RemotingCommand.createResponseCommand(RemotingSysResponseCode.SYSTEM_BUSY,
+                        "[OVERLOAD]system busy, start flow control for a while");
+                    response.setOpaque(opaque);
+                    ctx.writeAndFlush(response);
+                }
+            }
+        } else {
+            String error = " request type " + cmd.getCode() + " not supported";
+            final RemotingCommand response =
+                RemotingCommand.createResponseCommand(RemotingSysResponseCode.REQUEST_CODE_NOT_SUPPORTED, error);
+            response.setOpaque(opaque);
+            ctx.writeAndFlush(response);
+            log.error(RemotingHelper.parseChannelRemoteAddr(ctx.channel()) + error);
+        }
+    }
+```    
+该方法比较简单，该方法其实就是一个具体命令的处理模板（模板方法），具体的命令实现由各个子类实现，该类的主要责任就是将命令封装成一个线程对象，然后丢到线程池去执行。
+&nbsp;    
+__1.6.2. serverCallbackExecutorThreads__    
+含义：业务线程池的线程个数，RocketMQ按任务类型，每个任务类型会拥有一个专门的线程池，比如发送消息，消费消息，另外再加一个其他（默认的业务线程池），默认业务线程池，采用fixed类型，线程个数就是由serverCallbackExecutorThreads 。    
+线程名称：NettyServerPublicExecutor_    
+作用范围：broker,product,consume处理默认命令的业务线程池大小。    
+
+
 

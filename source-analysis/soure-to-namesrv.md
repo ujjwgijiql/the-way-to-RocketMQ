@@ -108,7 +108,8 @@ __1.6. NettyServerConfig nettyServerConfig、RemotingServer remotingServer、Exe
 1）NettyServerConfig 的配置含义    
 2）Netty线程模型中EventLoopGroup、EventExecutorGroup之间的区别于作用    
 3）在Channel的整个生命周期中，如何保证Channel的读写事件至始至终使用同一个线程处理    
-首先我们先过一下NettyServerConfig中的配置属性：    
+&nbsp;    
+__1.6.1. 首先我们先过一下NettyServerConfig中的配置属性：__    
 org.apache.rocketmq.remoting.netty.NettyServerConfig
 ```Java NettyServerConfig 属性定义
     private int listenPort = 8888;
@@ -117,10 +118,17 @@ org.apache.rocketmq.remoting.netty.NettyServerConfig
     private int serverSelectorThreads = 3;
     private int serverOnewaySemaphoreValue = 256;
     private int serverAsyncSemaphoreValue = 64;
+    
+    // 通道空闲时间，默认120S, 通过Netty的IdleStateHandler实现
     private int serverChannelMaxIdleTimeSeconds = 120;
 
+    // socket发送缓存区大小
     private int serverSocketSndBufSize = NettySystemConfig.socketSndbufSize;
+    
+    // socket接收缓存区大小
     private int serverSocketRcvBufSize = NettySystemConfig.socketRcvbufSize;
+    
+    // 是否使用PooledByteBuf(可重用，缓存ByteBuf)
     private boolean serverPooledByteBufAllocatorEnable = true;
 
     /**
@@ -133,7 +141,7 @@ org.apache.rocketmq.remoting.netty.NettyServerConfig
     private boolean useEpollNativeSelector = false;
 ```    
 &nbsp;    
-__1.6.1. serverWorkerThreads__    
+__1.6.1.1. serverWorkerThreads__    
 含义：业务线程池的线程个数，RocketMQ按任务类型，每个任务类型会拥有一个专门的线程池，比如发送消息，消费消息，另外再加一个其他（默认的业务线程池），默认业务线程池，采用fixed类型，线程个数就是由serverWorkerThreads。    
 线程名称：RemotingExecutorThread_    
 作用范围：该参数目前主要用于NameServer的默认业务线程池，处理诸如broker,product,consume与NameServer的所有交互命令。    
@@ -313,12 +321,307 @@ org.apache.rocketmq.namesrv.NamesrvController
         }
     }
 ```    
-该方法比较简单，该方法其实就是一个具体命令的处理模板（模板方法），具体的命令实现由各个子类实现，该类的主要责任就是将命令封装成一个线程对象，然后丢到线程池去执行。
+该方法比较简单，该方法其实就是一个具体命令的处理模板（模板方法），具体的命令实现由各个子类实现，该类的主要责任就是将命令封装成一个线程对象，然后丢到线程池去执行。    
 &nbsp;    
-__1.6.2. serverCallbackExecutorThreads__    
+__1.6.1.2. serverCallbackExecutorThreads__    
 含义：业务线程池的线程个数，RocketMQ按任务类型，每个任务类型会拥有一个专门的线程池，比如发送消息，消费消息，另外再加一个其他（默认的业务线程池），默认业务线程池，采用fixed类型，线程个数就是由serverCallbackExecutorThreads 。    
 线程名称：NettyServerPublicExecutor_    
 作用范围：broker,product,consume处理默认命令的业务线程池大小。    
+源码来源：org.apache.rocketmq.remoting.netty.NettyRemotingServer    
+```Java
+    public NettyRemotingServer(final NettyServerConfig nettyServerConfig,
+        final ChannelEventListener channelEventListener) {
+        super(nettyServerConfig.getServerOnewaySemaphoreValue(), nettyServerConfig.getServerAsyncSemaphoreValue());
+        this.serverBootstrap = new ServerBootstrap();
+        this.nettyServerConfig = nettyServerConfig;
+        this.channelEventListener = channelEventListener;
+
+        // 此处用到了serverCallbackExecutorThreads，用于生成publicExecutor
+        int publicThreadNums = nettyServerConfig.getServerCallbackExecutorThreads();
+        if (publicThreadNums <= 0) {
+            publicThreadNums = 4;
+        }
+
+        this.publicExecutor = Executors.newFixedThreadPool(publicThreadNums, new ThreadFactory() {
+            private AtomicInteger threadIndex = new AtomicInteger(0);
+
+            @Override
+            public Thread newThread(Runnable r) {
+                return new Thread(r, "NettyServerPublicExecutor_" + this.threadIndex.incrementAndGet());
+            }
+        });
+
+        this.eventLoopGroupBoss = new NioEventLoopGroup(1, new ThreadFactory() {
+            private AtomicInteger threadIndex = new AtomicInteger(0);
+
+            @Override
+            public Thread newThread(Runnable r) {
+                return new Thread(r, String.format("NettyBoss_%d", this.threadIndex.incrementAndGet()));
+            }
+        });
+
+        if (useEpoll()) {
+            this.eventLoopGroupSelector = new EpollEventLoopGroup(nettyServerConfig.getServerSelectorThreads(), new ThreadFactory() {
+                private AtomicInteger threadIndex = new AtomicInteger(0);
+                private int threadTotal = nettyServerConfig.getServerSelectorThreads();
+
+                @Override
+                public Thread newThread(Runnable r) {
+                    return new Thread(r, String.format("NettyServerEPOLLSelector_%d_%d", threadTotal, this.threadIndex.incrementAndGet()));
+                }
+            });
+        } else {
+            this.eventLoopGroupSelector = new NioEventLoopGroup(nettyServerConfig.getServerSelectorThreads(), new ThreadFactory() {
+                private AtomicInteger threadIndex = new AtomicInteger(0);
+                private int threadTotal = nettyServerConfig.getServerSelectorThreads();
+
+                @Override
+                public Thread newThread(Runnable r) {
+                    return new Thread(r, String.format("NettyServerNIOSelector_%d_%d", threadTotal, this.threadIndex.incrementAndGet()));
+                }
+            });
+        }
+
+        loadSslContext();
+    }
+    
+    
+    @Override
+    public void registerProcessor(int requestCode, NettyRequestProcessor processor, ExecutorService executor) {
+        ExecutorService executorThis = executor;
+        
+        // 设置成了publicExecutor
+        if (null == executor) {
+            executorThis = this.publicExecutor;
+        }
+
+        Pair<NettyRequestProcessor, ExecutorService> pair = new Pair<NettyRequestProcessor, ExecutorService>(processor, executorThis);
+        this.processorTable.put(requestCode, pair);
+    }
+```    
+&nbsp;    
+__1.6.1.3. serverSelectorThreads__     
+含义：Netty IO线程数量，Selector所在的线程个数，也就主从Reactor模型中的从Reactor线程数量 。    
+线程名称：NettyServerNIOSelector_    
+作用范围：broker,product,consume 服务端的IO线程数量。    
+源码来源：org.apache.rocketmq.remoting.netty.NettyRemotingServer    
+```Java
+    public NettyRemotingServer(final NettyServerConfig nettyServerConfig,
+        final ChannelEventListener channelEventListener) {
+        super(nettyServerConfig.getServerOnewaySemaphoreValue(), nettyServerConfig.getServerAsyncSemaphoreValue());
+        this.serverBootstrap = new ServerBootstrap();
+        this.nettyServerConfig = nettyServerConfig;
+        this.channelEventListener = channelEventListener;
+
+        int publicThreadNums = nettyServerConfig.getServerCallbackExecutorThreads();
+        if (publicThreadNums <= 0) {
+            publicThreadNums = 4;
+        }
+
+        this.publicExecutor = Executors.newFixedThreadPool(publicThreadNums, new ThreadFactory() {
+            private AtomicInteger threadIndex = new AtomicInteger(0);
+
+            @Override
+            public Thread newThread(Runnable r) {
+                return new Thread(r, "NettyServerPublicExecutor_" + this.threadIndex.incrementAndGet());
+            }
+        });
+
+        this.eventLoopGroupBoss = new NioEventLoopGroup(1, new ThreadFactory() {
+            private AtomicInteger threadIndex = new AtomicInteger(0);
+
+            @Override
+            public Thread newThread(Runnable r) {
+                return new Thread(r, String.format("NettyBoss_%d", this.threadIndex.incrementAndGet()));
+            }
+        });
+
+        if (useEpoll()) {
+        
+            // 使用serverSelectorThreads
+            this.eventLoopGroupSelector = new EpollEventLoopGroup(nettyServerConfig.getServerSelectorThreads(), new ThreadFactory() {
+                private AtomicInteger threadIndex = new AtomicInteger(0);
+                private int threadTotal = nettyServerConfig.getServerSelectorThreads();
+
+                @Override
+                public Thread newThread(Runnable r) {
+                    return new Thread(r, String.format("NettyServerEPOLLSelector_%d_%d", threadTotal, this.threadIndex.incrementAndGet()));
+                }
+            });
+        } else {
+        
+            // 使用serverSelectorThreads
+            this.eventLoopGroupSelector = new NioEventLoopGroup(nettyServerConfig.getServerSelectorThreads(), new ThreadFactory() {
+                private AtomicInteger threadIndex = new AtomicInteger(0);
+                private int threadTotal = nettyServerConfig.getServerSelectorThreads();
+
+                @Override
+                public Thread newThread(Runnable r) {
+                    return new Thread(r, String.format("NettyServerNIOSelector_%d_%d", threadTotal, this.threadIndex.incrementAndGet()));
+                }
+            });
+        }
+
+        loadSslContext();
+    }
+```    
+&nbsp;    
+__1.6.1.4. serverOnewaySemaphoreValue、 serverAsyncSemaphoreValue__    
+含义：服务端 oneWay(单向执行)、异步调用的信号量（并发度）    
+线程名称：无    
+作用范围：通常用在客户端与Broker的交互    
+源码来源：org.apache.rocketmq.remoting.netty.NettyRemotingServer    
+```Java
+    public NettyRemotingServer(final NettyServerConfig nettyServerConfig,
+        final ChannelEventListener channelEventListener) {
+        
+        // 使用了serverOnewaySemaphoreValue、serverAsyncSemaphoreValue
+        super(nettyServerConfig.getServerOnewaySemaphoreValue(), nettyServerConfig.getServerAsyncSemaphoreValue());
+        this.serverBootstrap = new ServerBootstrap();
+        this.nettyServerConfig = nettyServerConfig;
+        this.channelEventListener = channelEventListener;
+
+        int publicThreadNums = nettyServerConfig.getServerCallbackExecutorThreads();
+        if (publicThreadNums <= 0) {
+            publicThreadNums = 4;
+        }
+
+        this.publicExecutor = Executors.newFixedThreadPool(publicThreadNums, new ThreadFactory() {
+            private AtomicInteger threadIndex = new AtomicInteger(0);
+
+            @Override
+            public Thread newThread(Runnable r) {
+                return new Thread(r, "NettyServerPublicExecutor_" + this.threadIndex.incrementAndGet());
+            }
+        });
+
+        this.eventLoopGroupBoss = new NioEventLoopGroup(1, new ThreadFactory() {
+            private AtomicInteger threadIndex = new AtomicInteger(0);
+
+            @Override
+            public Thread newThread(Runnable r) {
+                return new Thread(r, String.format("NettyBoss_%d", this.threadIndex.incrementAndGet()));
+            }
+        });
+
+        if (useEpoll()) {
+            this.eventLoopGroupSelector = new EpollEventLoopGroup(nettyServerConfig.getServerSelectorThreads(), new ThreadFactory() {
+                private AtomicInteger threadIndex = new AtomicInteger(0);
+                private int threadTotal = nettyServerConfig.getServerSelectorThreads();
+
+                @Override
+                public Thread newThread(Runnable r) {
+                    return new Thread(r, String.format("NettyServerEPOLLSelector_%d_%d", threadTotal, this.threadIndex.incrementAndGet()));
+                }
+            });
+        } else {
+            this.eventLoopGroupSelector = new NioEventLoopGroup(nettyServerConfig.getServerSelectorThreads(), new ThreadFactory() {
+                private AtomicInteger threadIndex = new AtomicInteger(0);
+                private int threadTotal = nettyServerConfig.getServerSelectorThreads();
+
+                @Override
+                public Thread newThread(Runnable r) {
+                    return new Thread(r, String.format("NettyServerNIOSelector_%d_%d", threadTotal, this.threadIndex.incrementAndGet()));
+                }
+            });
+        }
+
+        loadSslContext();
+    }
+```    
+org.apache.rocketmq.remoting.netty.NettyRemotingAbstract
+```Java
+    public void invokeOnewayImpl(final Channel channel, final RemotingCommand request, final long timeoutMillis)
+        throws InterruptedException, RemotingTooMuchRequestException, RemotingTimeoutException, RemotingSendRequestException {
+        request.markOnewayRPC();
+        boolean acquired = this.semaphoreOneway.tryAcquire(timeoutMillis, TimeUnit.MILLISECONDS);
+        if (acquired) {
+            final SemaphoreReleaseOnlyOnce once = new SemaphoreReleaseOnlyOnce(this.semaphoreOneway);
+            try {
+                channel.writeAndFlush(request).addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(ChannelFuture f) throws Exception {
+                        once.release();
+                        if (!f.isSuccess()) {
+                            log.warn("send a request command to channel <" + channel.remoteAddress() + "> failed.");
+                        }
+                    }
+                });
+            } catch (Exception e) {
+                once.release();
+                log.warn("write send a request command to channel <" + channel.remoteAddress() + "> failed.");
+                throw new RemotingSendRequestException(RemotingHelper.parseChannelRemoteAddr(channel), e);
+            }
+        } else {
+            if (timeoutMillis <= 0) {
+                throw new RemotingTooMuchRequestException("invokeOnewayImpl invoke too fast");
+            } else {
+                String info = String.format(
+                    "invokeOnewayImpl tryAcquire semaphore timeout, %dms, waiting thread nums: %d semaphoreAsyncValue: %d",
+                    timeoutMillis,
+                    this.semaphoreOneway.getQueueLength(),
+                    this.semaphoreOneway.availablePermits()
+                );
+                log.warn(info);
+                throw new RemotingTimeoutException(info);
+            }
+        }
+    }
+    
+    
+        public void invokeAsyncImpl(final Channel channel, final RemotingCommand request, final long timeoutMillis,
+        final InvokeCallback invokeCallback)
+        throws InterruptedException, RemotingTooMuchRequestException, RemotingTimeoutException, RemotingSendRequestException {
+        long beginStartTime = System.currentTimeMillis();
+        final int opaque = request.getOpaque();
+        boolean acquired = this.semaphoreAsync.tryAcquire(timeoutMillis, TimeUnit.MILLISECONDS);
+        if (acquired) {
+            final SemaphoreReleaseOnlyOnce once = new SemaphoreReleaseOnlyOnce(this.semaphoreAsync);
+            long costTime = System.currentTimeMillis() - beginStartTime;
+            if (timeoutMillis < costTime) {
+                throw new RemotingTooMuchRequestException("invokeAsyncImpl call timeout");
+            }
+
+            final ResponseFuture responseFuture = new ResponseFuture(channel, opaque, timeoutMillis - costTime, invokeCallback, once);
+            this.responseTable.put(opaque, responseFuture);
+            try {
+                channel.writeAndFlush(request).addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(ChannelFuture f) throws Exception {
+                        if (f.isSuccess()) {
+                            responseFuture.setSendRequestOK(true);
+                            return;
+                        }
+                        requestFail(opaque);
+                        log.warn("send a request command to channel <{}> failed.", RemotingHelper.parseChannelRemoteAddr(channel));
+                    }
+                });
+            } catch (Exception e) {
+                responseFuture.release();
+                log.warn("send a request command to channel <" + RemotingHelper.parseChannelRemoteAddr(channel) + "> Exception", e);
+                throw new RemotingSendRequestException(RemotingHelper.parseChannelRemoteAddr(channel), e);
+            }
+        } else {
+            if (timeoutMillis <= 0) {
+                throw new RemotingTooMuchRequestException("invokeAsyncImpl invoke too fast");
+            } else {
+                String info =
+                    String.format("invokeAsyncImpl tryAcquire semaphore timeout, %dms, waiting thread nums: %d semaphoreAsyncValue: %d",
+                        timeoutMillis,
+                        this.semaphoreAsync.getQueueLength(),
+                        this.semaphoreAsync.availablePermits()
+                    );
+                log.warn(info);
+                throw new RemotingTimeoutException(info);
+            }
+        }
+    }
+```    
+备注：单向（Oneway）发送特点为只负责发送消息，不等待服务器回应且没有回调函数触发，即只发送请求不等待应答。此方式发送消息的过程耗时非常短，一般在微秒级别。    
+应用场景：适用于某些耗时非常短，但对可靠性要求并不高的场景，例如日志收集。    
+&nbsp;    
+__1.6.2. Netty线程模型中EventLoopGroup、EventExecutorGroup之间的区别与作用__    
+
 
 
 

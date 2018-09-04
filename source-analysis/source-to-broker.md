@@ -320,6 +320,141 @@ org.apache.rocketmq.client.impl.producer.DefaultMQProducerImpl
 __2.1.2.1 获取topic的路由信息__    
 首先我们来思考一下，topic的路由信息包含哪些内容    
 消息的发布与订阅基于topic，路由发布信息以topic维度进行描述    
-Broker负载消息存储，一个topic可以分布在多台Broker上（负载均衡），每个Broker包含多个Queue。队列元数据基于一个Broker来描述（QueueData：所在BrokerName,读队列个数，写队列个数、权限、同步或异步）
+Broker负载消息存储，一个topic可以分布在多台Broker上（负载均衡），每个Broker包含多个Queue。队列元数据基于一个Broker来描述（QueueData：所在BrokerName、读队列个数、写队列个数、权限、同步或异步）    
+接下来先分析tryToFindTopicPublishInfo：获取该Topic的路由信息，基于该信息发送到具体的Broker的MessageQueue上。    
+org.apache.rocketmq.client.impl.producer.DefaultMQProducerImpl
+```java tryToFindTopicPublishInfo方法
+    private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) {
+    
+        // 从本地缓存(ConcurrentMap<String/* topic */, TopicPublishInfo>)中尝试获取，第一次肯定为空, 走下面的if
+        TopicPublishInfo topicPublishInfo = this.topicPublishInfoTable.get(topic);
+        if (null == topicPublishInfo || !topicPublishInfo.ok()) {
+            this.topicPublishInfoTable.putIfAbsent(topic, new TopicPublishInfo());
+            
+            // 通过updateTopicRouteInfoFromNameServer方法去NameServer获取配置信息并更新本地缓存配置
+            this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic);
+            topicPublishInfo = this.topicPublishInfoTable.get(topic);
+        }
+
+        if (topicPublishInfo.isHaveTopicRouterInfo() || topicPublishInfo.ok()) {
+            return topicPublishInfo;
+        } else {
+            this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic, true, this.defaultMQProducer);
+            topicPublishInfo = this.topicPublishInfoTable.get(topic);
+            return topicPublishInfo;
+        }
+    }
+```    
+org.apache.rocketmq.client.impl.factory.MQClientInstance
+```java updateTopicRouteInfoFromNameServer方法
+    public boolean updateTopicRouteInfoFromNameServer(final String topic) {
+        return updateTopicRouteInfoFromNameServer(topic, false, null);
+    }
+    
+    
+    public boolean updateTopicRouteInfoFromNameServer(final String topic, boolean isDefault,
+        DefaultMQProducer defaultMQProducer) {
+        try {
+        
+            // 为了避免重复从NameServer获取配置信息，在这里使用了ReentrantLock，并且设有超时时间。固定为3000s。
+            if (this.lockNamesrv.tryLock(LOCK_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                try {
+                    TopicRouteData topicRouteData;
+                    
+                    // 获取topic的配置信息，具体的实现就是通过与NameServer的长连接Channel发送GET_ROUTEINTO_BY_TOPIC(105)命令，获取配置信息。注意，次过程的超时时间为3s，由此可见，NameServer的实现要求高效。
+                    // 获取默认topic的配置信息
+                    if (isDefault && defaultMQProducer != null) {
+                        topicRouteData = this.mQClientAPIImpl.getDefaultTopicRouteInfoFromNameServer(defaultMQProducer.getCreateTopicKey(),
+                            1000 * 3);
+                        if (topicRouteData != null) {
+                            for (QueueData data : topicRouteData.getQueueDatas()) {
+                                int queueNums = Math.min(defaultMQProducer.getDefaultTopicQueueNums(), data.getReadQueueNums());
+                                data.setReadQueueNums(queueNums);
+                                data.setWriteQueueNums(queueNums);
+                            }
+                        }
+                    
+                    // 获取指定topic的配置信息
+                    } else {
+                        topicRouteData = this.mQClientAPIImpl.getTopicRouteInfoFromNameServer(topic, 1000 * 3);
+                    }
+                    if (topicRouteData != null) {
+                    
+                        // 从这里开始，拿到最新的topic发布信息后，需要与本地缓存中的topic发布信息进行比较，如果有变化，则需要同步更新发送者、消费者关于该topic的缓存。
+                        TopicRouteData old = this.topicRouteTable.get(topic);
+                        boolean changed = topicRouteDataIsChange(old, topicRouteData);
+                        if (!changed) {
+                            changed = this.isNeedUpdateTopicRouteInfo(topic);
+                        } else {
+                            log.info("the topic[{}] route info changed, old[{}] ,new[{}]", topic, old, topicRouteData);
+                        }
+
+                        // 更新发送者的缓存
+                        if (changed) {
+                            TopicRouteData cloneTopicRouteData = topicRouteData.cloneTopicRouteData();
+
+                            for (BrokerData bd : topicRouteData.getBrokerDatas()) {
+                                this.brokerAddrTable.put(bd.getBrokerName(), bd.getBrokerAddrs());
+                            }
+
+                            // 更新订阅者的缓存（消费队列信息）
+                            // Update Pub info
+                            {
+                                TopicPublishInfo publishInfo = topicRouteData2TopicPublishInfo(topic, topicRouteData);
+                                publishInfo.setHaveTopicRouterInfo(true);
+                                Iterator<Entry<String, MQProducerInner>> it = this.producerTable.entrySet().iterator();
+                                while (it.hasNext()) {
+                                    Entry<String, MQProducerInner> entry = it.next();
+                                    MQProducerInner impl = entry.getValue();
+                                    if (impl != null) {
+                                        impl.updateTopicPublishInfo(topic, publishInfo);
+                                    }
+                                }
+                            }
+
+                            // Update sub info
+                            {
+                                Set<MessageQueue> subscribeInfo = topicRouteData2TopicSubscribeInfo(topic, topicRouteData);
+                                Iterator<Entry<String, MQConsumerInner>> it = this.consumerTable.entrySet().iterator();
+                                while (it.hasNext()) {
+                                    Entry<String, MQConsumerInner> entry = it.next();
+                                    MQConsumerInner impl = entry.getValue();
+                                    if (impl != null) {
+                                        impl.updateTopicSubscribeInfo(topic, subscribeInfo);
+                                    }
+                                }
+                            }
+                            log.info("topicRouteTable.put. Topic = {}, TopicRouteData[{}]", topic, cloneTopicRouteData);
+                            this.topicRouteTable.put(topic, cloneTopicRouteData);
+                            return true;
+                        }
+                    } else {
+                        log.warn("updateTopicRouteInfoFromNameServer, getTopicRouteInfoFromNameServer return null, Topic: {}", topic);
+                    }
+                } catch (Exception e) {
+                    if (!topic.startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX) && !topic.equals(MixAll.AUTO_CREATE_TOPIC_KEY_TOPIC)) {
+                        log.warn("updateTopicRouteInfoFromNameServer Exception", e);
+                    }
+                } finally {
+                    this.lockNamesrv.unlock();
+                }
+            } else {
+                log.warn("updateTopicRouteInfoFromNameServer tryLock timeout {}ms", LOCK_TIMEOUT_MILLIS);
+            }
+        } catch (InterruptedException e) {
+            log.warn("updateTopicRouteInfoFromNameServer Exception", e);
+        }
+
+        return false;
+    }
+```    
+至此tryToFindTopicPublishInfo运行完毕，从NameServer获取TopicPublishData，继续消息发送的第二个步骤，选取一个消息队列。    
+&nbsp;    
+__2.1.2.2 获取MessageQueue__    
+核心源码：DefaultMQProducerImpl.sendDefaultImpl    
+MessageQueue tmpmq = this.selectOneMessageQueue(topicPublishInfo, lastBrokerName);    
+
+
+
 
 

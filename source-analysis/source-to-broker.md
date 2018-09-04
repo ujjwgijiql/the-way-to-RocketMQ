@@ -16,6 +16,8 @@ Broker在RocketMQ架构中的角色，就是存储消息，核心任务就是持
     用来表示一个消费消息应用，一个Consumer Group下包含多个Consumer实例，可以是多台机器，也可以是一台机器的多个进程，或者一个进程的多个Consumer对象。一个Consumer Group下的多个Consumer以均摊方式消费消息，如果设置为广播方式，那么这个Consumer Group下的每个实例都会消费全量数据。    
 &nbsp;     
 ### 2. Broker存储设计概要     
-
+[RocketMQ数据存储结构]:https://github.com/zhang-jh/the-way-to-RocketMQ/blob/master/images/data_storage_structure.png
+![RocketMQ数据存储结构]
+#### 从配置文件的角度来窥探Broker存储设计的关注点：    
 
 

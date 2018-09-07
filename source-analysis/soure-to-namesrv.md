@@ -104,7 +104,7 @@ org.apache.rocketmq.remoting.ChannelEventListener
 ```    
 &nbsp;    
 __1.6. NettyServerConfig nettyServerConfig、RemotingServer remotingServer、ExecutorService remotingExecutor__    
-这三个属性与网络通信有关，NameServer与Broker、Product、Consume之间的网络通信，基于Netty。
+这三个属性与网络通信有关，NameServer与Broker、Product、Consume之间的网络通信，基于Netty。    
 1）NettyServerConfig 的配置含义    
 2）Netty线程模型中EventLoopGroup、EventExecutorGroup之间的区别于作用    
 3）在Channel的整个生命周期中，如何保证Channel的读写事件至始至终使用同一个线程处理    

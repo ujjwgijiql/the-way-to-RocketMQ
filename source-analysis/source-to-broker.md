@@ -460,6 +460,67 @@ org.apache.rocketmq.client.impl.factory.MQClientInstance
 __2.1.2.2 获取MessageQueue__    
 核心源码：DefaultMQProducerImpl.sendDefaultImpl    
 MessageQueue tmpmq = this.selectOneMessageQueue(topicPublishInfo, lastBrokerName);    
+org.apache.rocketmq.client.impl.producer.DefaultMQProducerImpl
+```
+    private MQFaultStrategy mqFaultStrategy = new MQFaultStrategy();
+    
+    public MessageQueue selectOneMessageQueue(final TopicPublishInfo tpInfo, final String lastBrokerName) {
+        return this.mqFaultStrategy.selectOneMessageQueue(tpInfo, lastBrokerName);
+    }
+```    
+org.apache.rocketmq.client.latency.MQFaultStrategy
+```
+    public MessageQueue selectOneMessageQueue(final TopicPublishInfo tpInfo, final String lastBrokerName) {
+    
+        // 是否开启消息失败延迟，改值在消息发送者那里可以设置，如果该值为false,
+        // 直接从topic的所有队列中选择下一个，而不考虑该消息队列是否可用（比如Broker挂掉）
+        if (this.sendLatencyFaultEnable) {
+            try {
+                
+                // ThreadLocalIndex sendWhichQueue = new ThreadLocalIndex();
+                // 这里使用了本地线程变量ThreadLocal保存上一次发送的消息队列下标，消息发送使用轮询机制获取下一个发送消息队列。
+                int index = tpInfo.getSendWhichQueue().getAndIncrement();
+                
+                // 对topic所有的消息队列进行一次循环，为什么要循环呢？因为加入了发送异常延迟，
+                // 要确保选中的消息队列(MessageQueue)所在的Broker是正常的。
+                for (int i = 0; i < tpInfo.getMessageQueueList().size(); i++) {
+                    int pos = Math.abs(index++) % tpInfo.getMessageQueueList().size();
+                    if (pos < 0)
+                        pos = 0;
+                    MessageQueue mq = tpInfo.getMessageQueueList().get(pos);
+                    
+                    // 判断当前的消息队列是否可用。
+                    if (latencyFaultTolerance.isAvailable(mq.getBrokerName())) {
+                        if (null == lastBrokerName || mq.getBrokerName().equals(lastBrokerName))
+                            return mq;
+                    }
+                }
+
+                final String notBestBroker = latencyFaultTolerance.pickOneAtLeast();
+                int writeQueueNums = tpInfo.getQueueIdByBroker(notBestBroker);
+                if (writeQueueNums > 0) {
+                    final MessageQueue mq = tpInfo.selectOneMessageQueue();
+                    if (notBestBroker != null) {
+                        mq.setBrokerName(notBestBroker);
+                        mq.setQueueId(tpInfo.getSendWhichQueue().getAndIncrement() % writeQueueNums);
+                    }
+                    return mq;
+                } else {
+                    latencyFaultTolerance.remove(notBestBroker);
+                }
+            } catch (Exception e) {
+                log.error("Error occurred when selecting message queue", e);
+            }
+
+            return tpInfo.selectOneMessageQueue();
+        }
+
+        return tpInfo.selectOneMessageQueue(lastBrokerName);
+    }
+```    
+要理解上面【对topic所有的消息队列进行一次循环】的逻辑，我们就需要理解RocketMQ 发送消息延迟机制，具体实现类：    
+org.apache.rocketmq.client.latency.MQFaultStrategy
+
 
 
 

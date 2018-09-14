@@ -568,7 +568,19 @@ __2.1.2.3 根据MessageQueue向特定的Broker发送消息__
 &nbsp;    
 &nbsp;    
 ### 思考：
-1、消息发送时时异常处理思路
-1）NameServer挂了
-2）Broker挂了
+1、消息发送时时异常处理思路    
+1.1. NameServer挂了    
+1.2. Broker挂了    
+1、消息发送者在同一时刻持有NameServer集群中的一个连接用来及时获取broker等信息（topic路由信息），每一个Topic的队列分散在不同的Broker上，默认topic在Broker中对应4个发送队列，4个消息队列。    
+消息发送图解：    
+1、NameServer 挂机    
+在发送消息阶段，如果生产者本地缓存中没有缓存topic的路由信息，则需要从NameServer获取，只有当所有NameServer都不可用时，此时会抛MQClientException。如果所有的NameServer全部挂掉，并且生产者有缓存Topic的路由信息，此时依然可用发送消息。所以，NameServer的挂掉，通常不会对整个消息发送带来什么严重的问题。    
+2、Broker挂机    
+基础知识：消息生产者每隔30s，从NameServer处获取最新的Broker存活信息（topic路由信息）    
+Broker每30s,向所有的NameServer报告自己的情况，故Broker的down机，Product的最大可感知时间为60s,在这60s，消息发送会有什么影响呢？    
+此时分两种情况分别进行分析    
+1）启用sendLatencyFaultEnable    
+ 由于使用了故障延迟机制，详细原理见上文详解，会对获取的MQ进行可用性验证，比如获取一个MessageQueue,发送失败，这时会对该Broker进行标记，标记该Broker在未来的某段时间内不会被选择到，默认为（5分钟，不可改变），所有此时只有当该topic全部的broker挂掉，才无法发送消息，符合高可用设计。    
+2）不启用sendLatencyFaultEnable = false     
+此时会出现消息发送失败的情况，因为默认情况下，product每次发送消息，会采取轮询机制取下一个MessageQueue,由于可能该Message所在的Broker挂掉，会抛出异常。因为一个Broker默认为一个topic分配4个messageQueue,由于默认只重试2次，故消息有可能发送成功，有可能发送失败。    
 

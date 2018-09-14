@@ -491,11 +491,16 @@ org.apache.rocketmq.client.latency.MQFaultStrategy
                     
                     // 判断当前的消息队列是否可用。
                     if (latencyFaultTolerance.isAvailable(mq.getBrokerName())) {
+                    
+                        // 一旦一个MessageQueue符合条件，即刻返回，但该Topic所在的所有Broker全部标记不可用时，进入到下一步逻辑处理。
+                        // （在此处，我们要知道，标记为不可用，并不代表真的不可用，Broker是可用在故障期间被运营管理人员进行恢复的，比如重启）
                         if (null == lastBrokerName || mq.getBrokerName().equals(lastBrokerName))
                             return mq;
                     }
                 }
 
+                // 根据Broker的startTimestart进行一个排序，值越小，排前面，然后再选择一个，返回
+                // （此时不能保证一定可用，会抛出异常，如果消息发送方式是同步调用，则有重试机制）
                 final String notBestBroker = latencyFaultTolerance.pickOneAtLeast();
                 int writeQueueNums = tpInfo.getQueueIdByBroker(notBestBroker);
                 if (writeQueueNums > 0) {
@@ -519,10 +524,51 @@ org.apache.rocketmq.client.latency.MQFaultStrategy
     }
 ```    
 要理解上面【对topic所有的消息队列进行一次循环】的逻辑，我们就需要理解RocketMQ 发送消息延迟机制，具体实现类：    
-org.apache.rocketmq.client.latency.MQFaultStrategy
+org.apache.rocketmq.client.latency.MQFaultStrategy   
+```
+    private long[] latencyMax = {50L, 100L, 550L, 1000L, 2000L, 3000L, 15000L};
+    private long[] notAvailableDuration = {0L, 0L, 30000L, 60000L, 120000L, 180000L, 600000L};
+    
+    public void updateFaultItem(final String brokerName, final long currentLatency, boolean isolation) {
+        if (this.sendLatencyFaultEnable) {
+            long duration = computeNotAvailableDuration(isolation ? 30000 : currentLatency);
+            this.latencyFaultTolerance.updateFaultItem(brokerName, currentLatency, duration);
+        }
+    }
 
+    private long computeNotAvailableDuration(final long currentLatency) {
+        for (int i = latencyMax.length - 1; i >= 0; i--) {
+            if (currentLatency >= latencyMax[i])
+                return this.notAvailableDuration[i];
+        }
 
-
-
-
+        return 0;
+    }
+```
+latencyMax,最大延迟时间数值，在消息发送之前，先记录当前时间（start），然后消息发送成功或失败时记录结束时间（end），(end-start)代表一次消息延迟时间。发送错误时，updateFaultItem中isolation为真，与latencyMax中值进行比较时得值为30s,也就时该broker在接下来得600000L，也就时10分钟内不提供服务，等待该Broker的恢复。    
+计算出来的延迟值+加上本次消息的延迟值，设置为FaultItem的startTimestamp,表示当前时间必须大于该startTimestamp时，该broker才重新参与MessageQueue的选择。
+org.apache.rocketmq.client.latency.FaultItem
+```
+    class FaultItem implements Comparable<FaultItem> {
+        private final String name;
+        private volatile long currentLatency;
+        private volatile long startTimestamp;
+        
+        public boolean isAvailable() {
+            return (System.currentTimeMillis() - startTimestamp) >= 0;
+        }
+```   
+接下来将进入到消息发送的第三步，发送消息。    
+&nbsp;    
+__2.1.2.3 根据MessageQueue向特定的Broker发送消息__    
+源码：sendKernelImpl    
+暂时不深入研究该方法，此刻理解为通过Product与Broker的长连接将消息发送给Broker,然后Broker将消息存储，并返回生产者。    
+值得注意的是，如果消息发送模式为(SYNC)同步调用时，在生产者实现这边默认提供重试机制，通过（retryTimesWhenSendFailed）参数设置，默认为2，表示重试2次，也就时最多运行3次。   
+以上主要分析了RocketMQ同步方式发送消息的过程，异步模式与单向模式实现原理基本一样，异步只是增加了发送成功或失败的回掉方法。    
+&nbsp;    
+&nbsp;    
+### 思考：
+1、消息发送时时异常处理思路
+1）NameServer挂了
+2）Broker挂了
 

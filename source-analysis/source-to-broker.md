@@ -39,7 +39,9 @@ org.apache.rocketmq.store.config.MessageStoreConfig
     // ConsumeQueue file size,default is 30W
     private int mapedFileSizeConsumeQueue = 300000 * ConsumeQueue.CQ_STORE_UNIT_SIZE;
     
-    // 是否开启consumeQueueExt,默认为false,就是如果消费端消息消费速度跟不上，是否创建一个扩展的ConsumeQueue文件，如果不开启，应该会阻塞从commitlog文件中获取消息，并且ConsumeQueue,应该是按topic独立的。
+    // 是否开启consumeQueueExt,默认为false,就是如果消费端消息消费速度跟不上，
+    // 是否创建一个扩展的ConsumeQueue文件，如果不开启，应该会阻塞从commitlog文件中获取消息，
+    // 并且ConsumeQueue,应该是按topic独立的。
     // enable consume queue ext
     private boolean enableConsumeQueueExt = false;
     
@@ -51,13 +53,15 @@ org.apache.rocketmq.store.config.MessageStoreConfig
     // this will be set by pipe of calculate filter bit map.
     private int bitMapLengthConsumeQueueExt = 64;
     
-    // 刷写CommitLog的间隔时间，RocketMQ后台会启动一个线程，将消息刷写到磁盘，这个也就是该线程每次运行后等待的时间，默认为500毫秒。flush操作，调用文件通道的force()方法
+    // 刷写CommitLog的间隔时间，RocketMQ后台会启动一个线程，将消息刷写到磁盘，
+    // 这个也就是该线程每次运行后等待的时间，默认为500毫秒。flush操作，调用文件通道的force()方法
     // CommitLog flush interval
     // flush data to disk
     @ImportantField
     private int flushIntervalCommitLog = 500;
     
-    // 提交消息到CommitLog对应的文件通道的间隔时间，原理与上面类似；将消息写入到文件通道（调用FileChannel.write方法）得到最新的写指针，默认为200毫秒
+    // 提交消息到CommitLog对应的文件通道的间隔时间，原理与上面类似；
+    // 将消息写入到文件通道（调用FileChannel.write方法）得到最新的写指针，默认为200毫秒
     // Only used if TransientStorePool enabled
     // flush data to FileChannel
     @ImportantField

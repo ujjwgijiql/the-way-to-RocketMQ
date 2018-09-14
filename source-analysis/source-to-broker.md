@@ -326,6 +326,7 @@ __2.1.2.1 获取topic的路由信息__
 消息的发布与订阅基于topic，路由发布信息以topic维度进行描述    
 Broker负载消息存储，一个topic可以分布在多台Broker上（负载均衡），每个Broker包含多个Queue。队列元数据基于一个Broker来描述（QueueData：所在BrokerName、读队列个数、写队列个数、权限、同步或异步）    
 接下来先分析tryToFindTopicPublishInfo：获取该Topic的路由信息，基于该信息发送到具体的Broker的MessageQueue上。    
+首先默认是使用topic去查找配置，如果尝试找不到，则再使用默认的topic去找路由配置信息。    
 org.apache.rocketmq.client.impl.producer.DefaultMQProducerImpl
 ```java tryToFindTopicPublishInfo方法
     private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) {
@@ -365,7 +366,8 @@ org.apache.rocketmq.client.impl.factory.MQClientInstance
                 try {
                     TopicRouteData topicRouteData;
                     
-                    // 获取topic的配置信息，具体的实现就是通过与NameServer的长连接Channel发送GET_ROUTEINTO_BY_TOPIC(105)命令，获取配置信息。注意，次过程的超时时间为3s，由此可见，NameServer的实现要求高效。
+                    // 获取topic的配置信息，具体的实现就是通过与NameServer的长连接Channel发送GET_ROUTEINTO_BY_TOPIC(105)命令，
+                    // 获取配置信息。注意，次过程的超时时间为3s，由此可见，NameServer的实现要求高效。
                     // 获取默认topic的配置信息
                     if (isDefault && defaultMQProducer != null) {
                         topicRouteData = this.mQClientAPIImpl.getDefaultTopicRouteInfoFromNameServer(defaultMQProducer.getCreateTopicKey(),
@@ -384,7 +386,8 @@ org.apache.rocketmq.client.impl.factory.MQClientInstance
                     }
                     if (topicRouteData != null) {
                     
-                        // 从这里开始，拿到最新的topic发布信息后，需要与本地缓存中的topic发布信息进行比较，如果有变化，则需要同步更新发送者、消费者关于该topic的缓存。
+                        // 从这里开始，拿到最新的topic发布信息后，需要与本地缓存中的topic发布信息进行比较，
+                        // 如果有变化，则需要同步更新发送者、消费者关于该topic的缓存。
                         TopicRouteData old = this.topicRouteTable.get(topic);
                         boolean changed = topicRouteDataIsChange(old, topicRouteData);
                         if (!changed) {

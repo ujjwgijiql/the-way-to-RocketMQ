@@ -47,6 +47,7 @@ URL已经在代码中写死，可通过修改/etc/hosts文件来改变要访问�
 | heartbeatBrokerInterval| 30000   | 向Broker发送心跳间隔时间，单位毫秒  |
 | persistConsumerOffsetInterval| 5000   | 持久化Consumer消费进度间隔时间，单位毫秒  |
 &nbsp;&nbsp;
+&nbsp;&nbsp;
 
 ### 3、 Producer配置
 |       参数名        |   默认值    |                            说明                            |
@@ -62,3 +63,68 @@ URL已经在代码中写死，可通过修改/etc/hosts文件来改变要访问�
 | checkThreadPoolMinSize | 1       | Broker回查Producer事务状态时，线程池大小                      |
 | checkThreadPoolMaxSize | 1       | Broker回查Producer事务状态时，线程池大小                     |
 | checkRequestHoldMax | 2000       | Broker回查Producer事务状态时，Producer本地缓冲请求队列大小    |
+&nbsp;&nbsp;
+&nbsp;&nbsp;
+
+### 4、 PushConsumer配置
+|       参数名        |     默认值      |                            说明                            |
+|:------------------:|:---------------:|:----------------------------------------------------------:|
+| consumerGroup      | DEFAULT_CONSUMER| Consumer组名，多个Consumer如果属于一个应用，订阅同样的消息，且消费逻辑一致，则应将它们归为同一组|
+| messageModel       | CLUSTERING      | 消息模型，支持以下两种1.集群消费2.广播消费                    |
+| consumeFromWhere   | CONSUME_FROM_LAST_OFFSET | Consumer启动后，默认从什么位置开始消费              |
+| allocateMessageQueueStrategy | AllocateMessageQueueAveragely | Rebalance算法实现策略              |
+| Subscription       | {}              | 订阅关系                                                   |
+| messageListener    |                 | 消息监听器                                                 |
+| offsetStore        |                 | 消费进度存储                                               |
+| consumeThreadMin   | 10              | 消费线程池数量                                             |
+| consumeThreadMax   | 20              | 消费线程池数量                                             |
+| consumeConcurrentlyMaxSpan | 2000    | 单队列并行消费允许的最大跨度                                |
+| pullThresholdForQueue | 1000         | 拉消息本地队列缓存消息最大数                                |
+| Pullinterval       | 0               | 拉消息间隔，由于是长轮询，所以为0，但是如果应用了流控，也可以设置大于0的值，单位毫秒 |
+| consumeMessageBatchMaxSize | 1       | 批量消费，一次消费多少条消息                                |
+| pullBatchSize      | 32              | 批量拉消息，一次最多拉多少条                               |
+&nbsp;&nbsp;
+&nbsp;&nbsp;
+
+### 5、 PullConsumer配置
+|       参数名        |     默认值      |                            说明                            |
+|:------------------:|:---------------:|:----------------------------------------------------------:|
+| consumerGroup      |                 | Conusmer组名，多个Consumer如果属于一个应用，订阅同样的消息，且消费逻辑一致，则应该将它们归为同一组|
+| brokerSuspendMaxTimeMillis | 20000   | 长轮询，Consumer拉消息请求在Broker挂起最长时间，单位毫秒       |
+| consumerPullTimeoutMillis | 10000    | 非长轮询，拉消息超时时间，单位毫秒                            |
+| messageModel       | BROADCASTING    | 消息模型，支持以下两种：1集群消费 2广播模式                    |
+| messageQueueListener |               | 监听队列变化                                                |
+| offsetStore        |                 | 消费进度存储                                                |
+| registerTopics     |                 | 注册的topic集合                                             |
+| allocateMessageQueueStrategy|        | Rebalance算法实现策略                                       |
+&nbsp;&nbsp;
+&nbsp;&nbsp;
+
+### 6、 Broker配置参数
+查看Broker默认配置  
+```shell
+# mqbroker -m
+```
+|       参数名        |     默认值      |                            说明                            |
+|:------------------:|:---------------:|:----------------------------------------------------------:|
+| consumerGroup      |                 | Conusmer组名，多个Consumer如果属于一个应用，订阅同样的消息，且消费逻辑一致，则应该将它们归为同一组|
+| listenPort         | 10911           | Broker对外服务的监听端口                                     |
+| namesrvAddr        | null            | Name Server地址                                             |
+| brokerIP1          | 本机IP          | 本机IP地址，默认系统自动识别，但是某些多网卡机器会存在识别错误的情况，这种情况下可以人工配置。|
+| brokerName         | 本机主机名       |                                                            |
+| brokerClusterName  | DefaultCluster  | Broker所属哪个集群                                          |
+| brokerId           | 0               | BrokerId,必须是大于等于0的整数，0表示Master，>0表示Slave，一个Master可以挂多个Slave，Master和Slave通过BrokerName来配对|
+| storePathCommitLog | $HOME/store/commitlog | commitLog存储路径                                     |
+| storePathConsumeQueue | $HOME/store/consumequeue | 消费队列存储路径                                 |
+| storePathIndex     | $HOME/store/index | 消息索引存储队列                                           |
+| deleteWhen         | 4                 | 删除时间时间点，默认凌晨4点                                 |
+| fileReservedTime   | 48                | 文件保留时间，默认48小时                                    |
+| maxTransferBytesOnMessageInMemory| 262144| 单次pull消息（内存）传输的最大字节数                       |
+| maxTransferCountOnMessageInMemory| 32| 单次pull消息（内存）传输的最大条数                             |
+| maxTransferBytesOnMessageInDisk| 65535| 单次pull消息（磁盘）传输的最大字节数                          |
+| maxTransferCountOnMessageInDisk| 8   | 单次pull消息（磁盘）传输的最大条数                             |
+| messageIndexEnable | true            | 是否开启消息索引功能                                          |
+| messageIndexSafe   | false           | 是否提供安全的消息索引机制，索引保证不丢                        |
+| brokerRole         | ASYNC_MASTER    | Broker的角色 -ASYNC_MASTER异步复制Master  -SYNC_MASTER同步双写Master  -SLAVE |
+| flushDiskType      | ASYNC_FLUSH     | 刷盘方式     -ASYNC_FLUSH异步刷盘         -SYNC_FLUSH同步刷盘  |
+| cleanFileForciblyEnable | true       | 磁盘满，且无过期文件情况下TRUE表示强制删除文件，优先保证服务可用FALSE标记服务不可用，文件不删除|

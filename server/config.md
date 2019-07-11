@@ -127,4 +127,189 @@ URL已经在代码中写死，可通过修改/etc/hosts文件来改变要访问�
 | messageIndexSafe   | false           | 是否提供安全的消息索引机制，索引保证不丢                        |
 | brokerRole         | ASYNC_MASTER    | Broker的角色 -ASYNC_MASTER异步复制Master  -SYNC_MASTER同步双写Master  -SLAVE |
 | flushDiskType      | ASYNC_FLUSH     | 刷盘方式     -ASYNC_FLUSH异步刷盘         -SYNC_FLUSH同步刷盘  |
-| cleanFileForciblyEnable | true       | 磁盘满，且无过期文件情况下TRUE表示强制删除文件，优先保证服务可用FALSE标记服务不可用，文件不删除|
+| cleanFileForciblyEnable | true       | 磁盘满，且无过期文件情况下TRUE表示强制删除文件，优先保证服务可用FALSE标记服务不可用，文件不删除|  
+&nbsp;
+&nbsp;
+&nbsp;
+
+### broker-a.properties  
+```java
+# 所属集群名字
+brokerClusterName=rocketmq-cluster
+
+# broker名字，注意此处不同的配置文件填写的不一样
+brokerName=broker-a
+
+# 0 表示 Master，>0 表示 Slave
+brokerId=0
+
+# nameServer地址，分号分割
+namesrvAddr=rocketmq-nameserver1:9876;rocketmq-nameserver2:9876;rocketmq-nameserver3:9876;
+
+# 在发送消息时，自动创建服务器不存在的topic，默认创建的队列数
+defaultTopicQueueNums=4
+
+# 是否允许 Broker 自动创建Topic，建议线下开启，线上关闭
+autoCreateTopicEnable=true
+
+# 是否允许 Broker 自动创建订阅组，建议线下开启，线上关闭
+autoCreateSubscriptionGroup=true
+
+# Broker 对外服务的监听端口
+listenPort=10911
+
+# 删除文件时间点，默认凌晨 4点
+deleteWhen=04
+
+# 文件保留时间，默认 48 小时
+fileReservedTime=120
+
+# commitLog每个文件的大小默认1G
+mapedFileSizeCommitLog=1073741824
+
+# ConsumeQueue每个文件默认存30W条，根据业务情况调整
+mapedFileSizeConsumeQueue=300000
+#destroyMapedFileIntervalForcibly=120000
+#redeleteHangedFileInterval=120000
+
+# 检测物理文件磁盘空间
+diskMaxUsedSpaceRatio=88
+
+# 存储路径
+storePathRootDir=/opt/rocketmq/store
+
+# commitLog 存储路径
+storePathCommitLog=/opt/rocketmq/store/commitlog
+
+# 消费队列存储路径存储路径
+storePathConsumeQueue=/opt/rocketmq/store/consumequeue
+
+# 消息索引存储路径
+storePathIndex=/opt/rocketmq/store/index
+
+# checkpoint 文件存储路径
+storeCheckpoint=/opt/rocketmq/store/checkpoint
+
+# abort 文件存储路径
+abortFile=/opt/rocketmq/store/abort
+
+# 限制的消息大小
+maxMessageSize=65536
+#flushCommitLogLeastPages=4
+#flushConsumeQueueLeastPages=2
+#flushCommitLogThoroughInterval=10000
+#flushConsumeQueueThoroughInterval=60000
+
+# Broker 的角色
+#- ASYNC_MASTER 异步复制Master
+#- SYNC_MASTER 同步双写Master
+#- SLAVE
+brokerRole=ASYNC_MASTER
+
+# 刷盘方式
+#- ASYNC_FLUSH 异步刷盘
+#- SYNC_FLUSH 同步刷盘
+flushDiskType=ASYNC_FLUSH
+#checkTransactionMessageEnable=false
+
+# 发消息线程池数量
+#sendMessageThreadPoolNums=128
+
+# 拉消息线程池数量
+#pullMessageThreadPoolNums=128
+
+# 强制指定本机IP，需要根据每台机器进行修改。官方介绍可为空，系统默认自动识别，但多网卡时IP地址可能读取错误
+brokerIP1=192.168.1.7
+```
+&nbsp;
+&nbsp;
+
+### broker-a-s.properties  
+```java
+# 所属集群名字
+brokerClusterName=rocketmq-cluster
+
+# broker名字，注意此处不同的配置文件填写的不一样
+brokerName=broker-a
+
+# 0 表示 Master，>0 表示 Slave
+brokerId=1
+
+# nameServer地址，分号分割
+namesrvAddr=rocketmq-nameserver1:9876;rocketmq-nameserver2:9876;rocketmq-nameserver3:9876;
+
+# 在发送消息时，自动创建服务器不存在的topic，默认创建的队列数
+defaultTopicQueueNums=4
+
+# 是否允许 Broker 自动创建Topic，建议线下开启，线上关闭
+autoCreateTopicEnable=true
+
+# 是否允许 Broker 自动创建订阅组，建议线下开启，线上关闭
+autoCreateSubscriptionGroup=true
+
+# Broker 对外服务的监听端口
+listenPort=10911
+
+# 删除文件时间点，默认凌晨 4点
+deleteWhen=04
+
+# 文件保留时间，默认 48 小时
+fileReservedTime=120
+
+# commitLog每个文件的大小默认1G
+mapedFileSizeCommitLog=1073741824
+
+# ConsumeQueue每个文件默认存30W条，根据业务情况调整
+mapedFileSizeConsumeQueue=300000
+#destroyMapedFileIntervalForcibly=120000
+#redeleteHangedFileInterval=120000
+
+# 检测物理文件磁盘空间
+diskMaxUsedSpaceRatio=88
+
+# 存储路径
+storePathRootDir=/opt/rocketmq/store
+
+# commitLog 存储路径
+storePathCommitLog=/opt/rocketmq/store/commitlog
+
+# 消费队列存储路径存储路径
+storePathConsumeQueue=/opt/rocketmq/store/consumequeue
+
+# 消息索引存储路径
+storePathIndex=/opt/rocketmq/store/index
+
+# checkpoint 文件存储路径
+storeCheckpoint=/opt/rocketmq/store/checkpoint
+
+# abort 文件存储路径
+abortFile=/opt/rocketmq/store/abort
+
+# 限制的消息大小
+maxMessageSize=65536
+#flushCommitLogLeastPages=4
+#flushConsumeQueueLeastPages=2
+#flushCommitLogThoroughInterval=10000
+#flushConsumeQueueThoroughInterval=60000
+
+# Broker 的角色
+#- ASYNC_MASTER 异步复制Master
+#- SYNC_MASTER 同步双写Master
+#- SLAVE
+brokerRole=SLAVE
+
+# 刷盘方式
+#- ASYNC_FLUSH 异步刷盘
+#- SYNC_FLUSH 同步刷盘
+flushDiskType=ASYNC_FLUSH
+#checkTransactionMessageEnable=false
+
+# 发消息线程池数量
+#sendMessageThreadPoolNums=128
+
+# 拉消息线程池数量
+#pullMessageThreadPoolNums=128
+
+# 强制指定本机IP，需要根据每台机器进行修改。官方介绍可为空，系统默认自动识别，但多网卡时IP地址可能读取错误
+brokerIP1=192.168.1.149
+```

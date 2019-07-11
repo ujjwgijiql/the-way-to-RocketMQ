@@ -9,18 +9,18 @@
 &emsp;&emsp;缺点：单台机器宕机期间，这台机器上未被消费的消息在机器恢复之前不可订阅，消息实时性会受到受到影响。  
 
 先启动 NameServer，例如机器 IP 为：172.16.8.106:9876
-```sehll
-# nohup ./mqnamesrv &
+```shell
+# nohup sh bin/mqnamesrv &
 ```
 
 在机器 A，启动第一个 Master
 ```shell
-nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-noslave/broker-a.properties &
+# nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-noslave/broker-a.properties &
 ```
 
 在机器 B，启动第二个 Master
 ```shell
-nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-noslave/broker-b.properties &
+# nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-noslave/broker-b.properties &
 ```
 &nbsp;&nbsp;
 
@@ -30,28 +30,28 @@ nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-noslave/broker-b.properties 
 &emsp;&emsp;缺点：Master 宕机，磁盘损坏情况，会丢失少量消息。  
 
 先启动 NameServer，例如机器 IP 为：172.16.8.106:9876
-```sehll
+```shell
 # nohup ./mqnamesrv &
 ```
 
 在机器 A，启动第一个 Master
 ```shell
-nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-async/broker-a.properties &
+# nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-async/broker-a.properties &
 ```
 
 在机器 B，启动第二个 Master
 ```shell
-nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-async/broker-b.properties &
+# nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-async/broker-b.properties &
 ```
 
 在机器 C，启动第一个 Slave
 ```shell
-nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-async/broker-a-s.properties &
+# nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-async/broker-a-s.properties &
 ```
 
 在机器 D，启动第二个 Slave
 ```shell
-nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-async/broker-b-s.properties &
+# nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-async/broker-b-s.properties &
 ```
 &nbsp;&nbsp;
 
@@ -60,30 +60,46 @@ nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-async/broker-b-s.properti
 &emsp;&emsp;优点：数据与服务都无单点，Master宕机情况下，消息无延迟，服务可用性与数据可用性都非常高  
 &emsp;&emsp;缺点：性能比异步复制模式略低，大约低 10%左右，发送单个消息的 RT 会略高。目前主宕机后，备机不能自动切换为主机，后续会支持自动切换功能。  
 
-先启动 NameServer，例如机器 IP 为：172.16.8.106:9876
-```sehll
+先启动 NameServer，例如机器 IP 为：172.16.8.106:9876;172.16.8.107:9876
+```shell
 # nohup ./mqnamesrv &
 ```
 
 在机器 A，启动第一个 Master
 ```shell
-nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-sync/broker-a.properties &
+# nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-sync/broker-a.properties &
+```
+或：
+```shell
+# nohup ./mqbroker -n "172.16.8.106:9876;172.16.8.107:9876" -c ../conf/2m-2s-sync/broker-a.properties &
 ```
 
 在机器 B，启动第二个 Master
 ```shell
-nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-sync/broker-b.properties &
+# nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-sync/broker-b.properties &
 ```
+或：
+```shell
+# nohup ./mqbroker -n "172.16.8.106:9876;172.16.8.107:9876" -c ../conf/2m-2s-sync/broker-b.properties &
+```   
 
 在机器 C，启动第一个 Slave
 ```shell
-nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-sync/broker-a-s.properties &
+# nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-sync/broker-a-s.properties &
 ```
+或：
+```shell
+# nohup ./mqbroker -n "172.16.8.106:9876;172.16.8.107:9876" -c ../conf/2m-2s-sync/broker-a-s.properties &
+``` 
 
 在机器 D，启动第二个 Slave
 ```shell
-nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-sync/broker-b-s.properties &
+# nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-sync/broker-b-s.properties &
 ```
+或：
+```shell
+# nohup ./mqbroker -n "172.16.8.106:9876;172.16.8.107:9876" -c ../conf/2m-2s-sync/broker-b-s.properties &
+``` 
 
 &emsp;&emsp;以上 Broker 与 Slave 配对是通过指定相同的brokerName 参数来配对，Master 的 BrokerId 必须是 0，Slave的BrokerId 必须是大与 0 的数。另外一个 Master 下面可以挂载多个 Slave，同一 Master 下的多个 Slave 通过指定不同的 BrokerId 来区分。
 ***
@@ -101,12 +117,12 @@ nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-2s-sync/broker-b-s.propertie
 ```
 
 进入bin目录  
-   注：RocketMQ需要jdk1.7及以上版本  
+    注：RocketMQ需要jdk1.7及以上版本  
 &nbsp;&nbsp;
 
 ### 2、 启动NameServer
 ```shell
-# nohup sh mqnamesrv &
+# nohup ./mqnamesrv &
 [2] 17938
 # nohup: ignoring input and appending output to `nohup.out'
 ```
@@ -118,13 +134,13 @@ Jps查看NameServer进程
 ### 3、 启动BrokerServer a, BrokerServer b
 启动master A
 ```shell
-# nohup sh mqbroker -n 172.16.8.106:9876 -c ../conf/2m-noslave/broker-a.properties &
+# nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-noslave/broker-a.properties &
 [1] 17206
 ```
 
 启动master B
 ```shell
-# nohup sh mqbroker -n 172.16.8.106:9876 -c ../conf/2m-noslave/broker-b.properties &
+# nohup ./mqbroker -n 172.16.8.106:9876 -c ../conf/2m-noslave/broker-b.properties &
 [1] 14488
 ```
 
@@ -144,25 +160,25 @@ usage: mqadmin updateTopic [-b <arg>] [-c <arg>] [-h] [-n <arg>] [-o <arg>] [-p 
  -t,--topic <arg>            topic name
  -u,--unit <arg>             is unit topic (true|false
  -w,--writeQueueNums <arg>   set write queue nums
-
 ```
+
 实例：
 ```shell
-# sh mqadmin updateTopic -n 172.16.8.106:9876 -c DefaultCluster -t TopicTest1
+# ./mqadmin updateTopic -n 172.16.8.106:9876 -c DefaultCluster -t TopicTest1
 create topic to 172.16.8.107:10911 success.
 TopicConfig [topicName=TopicTest1, readQueueNums=8, writeQueueNums=8, perm=RW-, topicFilterType=SINGLE_TAG, topicSysFlag=0, order=false]
 ```
 
 ### 5、 删除topic
 ```shell
-# sh mqadmin deleteTopic -n 172.16.8.106:9876 -c DefaultCluster -t TopicTest1
+# ./mqadmin deleteTopic -n 172.16.8.106:9876 -c DefaultCluster -t TopicTest1
 delete topic [TopicTest1] from cluster [DefaultCluster] success.
 delete topic [TopicTest1] from NameServer success.
 ```
 
 ### 6、 查看topic信息
 ```shell
-# sh mqadmin topicList -n 172.16.8.106:9876
+# ./mqadmin topicList -n 172.16.8.106:9876
 BenchmarkTest
 TopicTest1
 broker-a
@@ -171,7 +187,7 @@ DefaultCluster
 
 ### 7、 查看topic统计信息
 ```shell
-# sh mqadmin topicStatus -n 172.16.8.106:9876 -t TopicTest1
+# ./mqadmin topicStatus -n 172.16.8.106:9876 -t TopicTest1
 #Broker Name            #QID  #Min Offset      #Max Offset             #Last Updated
 broker-a                          0     0                     0                     
 broker-a                          1     0                     0                      
@@ -185,10 +201,20 @@ broker-a                          7     0                     0
 
 ### 8、 查看所有消费组group
 ```shell
-# sh mqadmin consumerProgress -n 172.16.8.106:9876
+# ./mqadmin consumerProgress -n 172.16.8.106:9876
 ```
 
 ### 9、 查看指定消费组下的所有topic数据堆积情况
 ```shell
-# sh mqadmin consumerProgress -n 172.16.8.106:9876 -g ConsumerGroupName
+# ./mqadmin consumerProgress -n 172.16.8.106:9876 -g ConsumerGroupName
+```
+
+### 10、 停止broker
+```shell
+# ./mqshutdown broker
+```
+
+### 11、 停止NameServer
+```shell
+# ./mqshutdown namesrv
 ```
